@@ -127,7 +127,7 @@ use x11rb::{
         xproto::{
             Atom, AtomEnum, ChangeWindowAttributesAux, ConfigWindow, ConfigureNotifyEvent,
             ConfigureWindowAux, ConnectionExt as _, CreateGCAux, CreateWindowAux, CursorWrapper, EventMask,
-            FontWrapper, GcontextWrapper, GetPropertyReply, ImageFormat, PixmapWrapper, PropMode, Property,
+            FontWrapper, GcontextWrapper, GetPropertyReply, ImageFormat, NotifyDetail, NotifyMode, PixmapWrapper, PropMode, Property,
             QueryExtensionReply, Screen, SelectionNotifyEvent, SelectionRequestEvent, StackMode, WindowClass,
             CONFIGURE_NOTIFY_EVENT, SELECTION_NOTIFY_EVENT,
         },
@@ -1439,7 +1439,7 @@ where
 
             xwm.conn.change_window_attributes(
                 n.window,
-                &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE),
+                &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE | EventMask::FOCUS_CHANGE),
             )?;
             xwm.conn.flush()?;
 
@@ -2234,23 +2234,34 @@ where
                 }
             }
         }
-        Event::FocusIn(n) => {
+        // Backported from upstream (2026-10-06): _NET_ACTIVE_WINDOW names the
+        // managed window that has focus, or none when the root gets it,
+        // never the root itself.
+        Event::FocusIn(n)
+            if n.event == xwm.screen.root
+                && matches!(n.detail, NotifyDetail::NONE | NotifyDetail::POINTER_ROOT) =>
+        {
             conn.change_property32(
                 PropMode::REPLACE,
                 xwm.screen.root,
                 xwm.atoms._NET_ACTIVE_WINDOW,
                 AtomEnum::WINDOW,
-                &[n.event],
+                &[x11rb::NONE],
             )?;
         }
-        Event::FocusOut(n) => {
-            conn.change_property32(
-                PropMode::REPLACE,
-                xwm.screen.root,
-                xwm.atoms._NET_ACTIVE_WINDOW,
-                AtomEnum::WINDOW,
-                &[n.event],
-            )?;
+        Event::FocusIn(n)
+            if n.detail != NotifyDetail::POINTER
+                && !matches!(n.mode, NotifyMode::GRAB | NotifyMode::UNGRAB) =>
+        {
+            if xwm.windows.iter().any(|x| x.window_id() == n.event) {
+                conn.change_property32(
+                    PropMode::REPLACE,
+                    xwm.screen.root,
+                    xwm.atoms._NET_ACTIVE_WINDOW,
+                    AtomEnum::WINDOW,
+                    &[n.event],
+                )?;
+            }
         }
         Event::ClientMessage(msg) => {
             if let Some(reply) = conn.get_atom_name(msg.type_)?.reply_unchecked()? {
