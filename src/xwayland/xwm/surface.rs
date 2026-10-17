@@ -536,6 +536,22 @@ impl X11Surface {
         } else {
             self.change_net_state(&[], &[self.atoms._NET_WM_STATE_HIDDEN])?;
         }
+
+        if let Some(conn) = self.conn.upgrade() {
+            let wm_state = if suspended {
+                3u32 /*IconicState*/
+            } else {
+                1u32 /*NormalState*/
+            };
+            conn.change_property32(
+                PropMode::REPLACE,
+                self.window,
+                self.atoms.WM_STATE,
+                self.atoms.WM_STATE,
+                &[wm_state, 0 /*WINDOW_NONE*/],
+            )?;
+            conn.flush()?;
+        }
         Ok(())
     }
 
