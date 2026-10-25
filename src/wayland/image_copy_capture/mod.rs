@@ -1374,7 +1374,17 @@ where
                 // Frame not found in any session
                 data.inner.lock().unwrap().fail(resource, FailureReason::Unknown);
             }
-            ext_image_copy_capture_frame_v1::Request::Destroy => {}
+            ext_image_copy_capture_frame_v1::Request::Destroy => {
+                // The session may take a new frame from now. `destroyed` runs
+                // only once the client's requests so far are dispatched, so a
+                // `create_frame` sent right after this would otherwise still
+                // find this frame and raise `duplicate_frame`.
+                let frame_ref = FrameRef {
+                    obj: resource.clone(),
+                    inner: data.inner.clone(),
+                };
+                release_frame(state, &frame_ref);
+            }
             _ => unreachable!(),
         }
     }
@@ -1390,25 +1400,28 @@ where
             inner: data.inner.clone(),
         };
 
-        // Remove the frame from whichever session holds it
-        for session in &state.image_copy_capture_state().sessions {
-            session
-                .inner
-                .lock()
-                .unwrap()
-                .active_frame
-                .take_if(|f| f == &frame_ref);
-        }
-        for session in &state.image_copy_capture_state().cursor_sessions {
-            session
-                .inner
-                .lock()
-                .unwrap()
-                .active_frame
-                .take_if(|f| f == &frame_ref);
-        }
-
+        release_frame(state, &frame_ref);
         state.frame_aborted(frame_ref);
+    }
+}
+
+/// Removes `frame_ref` from whichever session holds it as its active frame.
+fn release_frame<D: ImageCopyCaptureHandler>(state: &mut D, frame_ref: &FrameRef) {
+    for session in &state.image_copy_capture_state().sessions {
+        session
+            .inner
+            .lock()
+            .unwrap()
+            .active_frame
+            .take_if(|f| f == frame_ref);
+    }
+    for session in &state.image_copy_capture_state().cursor_sessions {
+        session
+            .inner
+            .lock()
+            .unwrap()
+            .active_frame
+            .take_if(|f| f == frame_ref);
     }
 }
 
