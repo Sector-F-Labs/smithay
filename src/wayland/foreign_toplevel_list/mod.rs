@@ -258,6 +258,12 @@ impl ForeignToplevelHandle {
         self.inner.0.lock().unwrap().closed
     }
 
+    /// Check if two toplevel handles belong to the same toplevel.
+    pub fn matches(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+            || self.inner.0.lock().unwrap().identifier == other.inner.0.lock().unwrap().identifier
+    }
+
     fn init_new_instance(&self, toplevel: ExtForeignToplevelHandleV1) {
         debug_assert!(
             !self.is_closed(),
